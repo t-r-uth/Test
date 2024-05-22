@@ -55,7 +55,6 @@ clinical_data_bill=left_join(clinical_data,bill_id_amount_2,by=c("patient_id","d
 #Join clinical_data_bill and demographics
 clinical_data_bill_demo=left_join(clinical_data_bill,demographics,by=c("patient_id"))
 
-#replace "
 
 
 #Standardize data
@@ -117,6 +116,21 @@ clinical_data_bill_demo_3=clinical_data_bill_demo_3%>%
   ungroup()%>%
   select(-rehospitalization_cost)#no need, this is just to calculate rehospitalization_cost_totalnumber
 
+#Find out subsequent number of treatments for each patient
+clinical_data_bill_demo_3=clinical_data_bill_demo_3%>%
+  group_by(patient_id) %>%
+  mutate(treatment_totalnumberT_1 = ifelse(hospitalization_nth == 2, treatment_totalnumber, 0))%>%#1st rehospitalization
+  mutate(treatment_totalnumberT1 = sum(treatment_totalnumberT_1))%>%
+  group_by(patient_id) %>%
+  mutate(treatment_totalnumberT_2 = ifelse(hospitalization_nth == 3, gaf_lv, 0))%>%
+  mutate(treatment_totalnumberT2 = sum(treatment_totalnumberT_2))%>%
+  group_by(patient_id) %>%
+  mutate(treatment_totalnumberT_3 = ifelse(hospitalization_nth == 4, gaf_lv, 0))%>%
+  mutate(treatment_totalnumberT3 = sum(treatment_totalnumberT_3))%>%
+  ungroup()%>%
+  select(-treatment_totalnumberT_1,-treatment_totalnumberT_2,-treatment_totalnumberT_3)#no need
+
+
 #Find out subsequent GAF score for each patient
 clinical_data_bill_demo_3=clinical_data_bill_demo_3%>%
   group_by(patient_id) %>%
@@ -159,6 +173,9 @@ clinical_data_bill_demo_3=clinical_data_bill_demo_3%>%
   ungroup()%>%
   select(-cgis_dis_scoreT_1,-cgis_dis_scoreT_2,-cgis_dis_scoreT_3)#no need
 
+colnames(clinical_data_bill_demo_3)
+clinical_data_bill_demo_3=clinical_data_bill_demo_3%>%
+  mutate_at(vars(41:52),~ifelse(.==0,NA,.))
 
 #Select the earliest admission date
 earliest_admissions <- clinical_data_bill_demo_3 %>%
@@ -173,12 +190,6 @@ descriptive=earliest_admissions#earliest_admissions#demographics #clinical_data_
 
 #Descriptive stats
 
-
-#descriptive$Year <-relevel(factor(descriptive$Year),ref="2018")
-#descriptive$Race <-relevel(factor(descriptive$Race),ref="4")
-#descriptivecomplete$NoDiabetic=ifelse(descriptivecomplete$NoDiabetic>1,1,0)#convert to only binary for table #morethanone=2,3,4
-
-
 #Remove unneccesary columns
 descriptive_2=descriptive%>%
   select(-c("date_of_birth"))
@@ -187,15 +198,13 @@ descriptive_2=descriptive%>%
 colnames(descriptive_2)
 
 
-descriptive_2[, -c(1,2,3,22:27,31:33,38:48)] <- lapply(descriptive_2[, -c(1,2,3,22:27,31:33,38:48)] , as.factor)
-descriptive_2[, c(1,2,3,22:27,31:33,38:48)] <- lapply(descriptive_2[, c(1,2,3,22:27,31:33,38:48)] , as.numeric)
+descriptive_2[, -c(22:27,31:33,35,38:51)] <- lapply(descriptive_2[, -c(22:27,31:33,35,38:51)] , as.factor)
+descriptive_2[, c(22:27,31:33,35,38:51)] <- lapply(descriptive_2[, c(22:27,31:33,35,38:51)] , as.numeric)
 
 
+#Find variables signifcant in predicting outcomes (logistic regression models,retain those with an association having a p-value of ≤ 0.1)
 
-#Find variables signifcant in predicting outcomes
-# => Fit logistic regression models for each variable separately with the outcome and retain those with an association having a p-value of ≤ 0.1. Tip: you may want to automate the whole process!
-
-vars <- colnames(descriptive_2)[-c(1:3,27,31,36:48)]#remove ID, date of admission and discharge, cost, LOS,hospitalization
+vars <- colnames(descriptive_2)[-c(1:3,27,31,36:51)]#remove ID, date of admission and discharge, cost, LOS,hospitalization
 xvars = list()
 
 #rehospitalization_totalnumber
@@ -218,8 +227,6 @@ for (var in vars) {
   }
 }#"medical_history_ren" "cgis_dis" 
 
-# => Put the names of the selected variables (without the treatment and outcome variables) in the variable called xvars by writing xvars <- c("ARF", ...) or do it automatically!
-# => Print xvar
 xvars <- names(xvars)
 print(xvars)
 
@@ -227,11 +234,9 @@ print(xvars)
 library(naniar)
 library(mice)
 Missingdata=descriptive_2
-pMiss <- function(x){sum(is.na(x))/length(x)*100}#percentage of missing data, but race already sub with 0 for non-malay
-View(data.frame(apply(Missingdata,2,pMiss)))
 gg_miss_var(Missingdata,show_pct = TRUE)#show missing data#completedData
 
-tempData  <- mice(descriptive_2[-c(1:3,27,31,36:48)],#remove ID, date of admission and discharge, cost, LOS,hospitalization
+tempData  <- mice(descriptive_2[-c(1:3,27,31,36:51)],#remove ID, date of admission and discharge, cost, LOS,hospitalization
                   m = 5,#no of imputations, 5 is sufficient
                   maxit = 5,#number of iterations for each imputation
                   method = "cart",
@@ -245,33 +250,29 @@ descriptive_2_completeddata=cbind(completeddata,descriptive_2[,c(27,31,36:48)])#
 library(MatchIt)
 
 matchitdata=descriptive_2_completeddata
+
+
 set.seed(123)
 m.out <- matchit(as.factor(trt_ssr) ~ gender + race +Age+resident_status+medical_history_dia + medical_history_sud + medical_history_hbp +
-                   medical_history_ren + medical_history_tum + medical_history_anx + medical_history_mood +treatment_totalnumber + 
-                   cgis_adm +gaf_lv ,
-                 data = descriptive_2_completeddata, methods = 'nearest', caliper=0.2,distance = 'glm', replace = FALSE,ratio = 1)#,caliper = .2,replace = FALSE,
+                   medical_history_ren + medical_history_tum + medical_history_anx + medical_history_mood +treatment_totalnumber +
+                   trt_anx + trt_con + trt_adt + trt_the + trt_oth + cgis_adm +gaf_lv ,
+                 data = descriptive_2_completeddata, methods = 'nearest',caliper = .2,distance = 'glm', replace = FALSE)#,ratio = 1,caliper = .2,replace = FALSE,
 
 
-#m.out <- matchit(as.factor(trt_ssr) ~medical_history_dia + medical_history_sud + medical_history_hbp +
-                   medical_history_ren + medical_history_tum + medical_history_anx + medical_history_mood +
-                   trt_anx + trt_con + trt_adt + trt_ssr + trt_the + trt_oth + symptom_1 + symptom_2 +
-                   symptom_3 + symptom_4 + symptom_5 + cgis_adm + cgis_dis + gaf_lv +
-                   gender + race + resident_status + BMI + combined_trt + treatment_totalnumber + Age,
-                 data = descriptive_2_completeddata, methods = 'nearest', distance = 'glm', replace = FALSE,ratio = 1)#,caliper = .2,replace = FALSE,
 summary(m.out)
 md <- match.data(m.out)
 md <- md%>%select(-c("distance","weights","subclass"))
 
 
-descriptive_3=descriptive_2[, -c(1,2,3)]
+descriptive_3=descriptive_2[, -c(1,2,3)]#descriptive_2_completeddata#descriptive_2[, -c(1,2,3)]#md
 
-descriptive_3=md
+
 
 descriptive_3=descriptive_3%>%select(gender,Age,race,resident_status,weight,height,BMI,medical_history_dia,medical_history_sud,medical_history_hbp,medical_history_ren,medical_history_tum,medical_history_anx,medical_history_mood,
                                      trt_anx,trt_con,trt_adt,trt_ssr,trt_the,trt_oth,combined_trt,treatment_totalnumber,symptom_1,symptom_2,symptom_3,symptom_4,symptom_5,
                                      cgis_adm,cgis_dis,gaf_lv,LOS,cost_peradmission_perid,hospitalization_nth,rehospitalization_totalnumber,
-                                     rehospitalization_LOS_totalnumber,rehospitalization_cost_totalnumber,GAFscoreT1,GAFscoreT2,GAFscoreT3,cgis_adm_scoreT1,
-                                     cgis_adm_scoreT2,cgis_adm_scoreT3,cgis_dis_scoreT1,cgis_dis_scoreT2,cgis_dis_scoreT3)
+                                     rehospitalization_LOS_totalnumber,rehospitalization_cost_totalnumber,treatment_totalnumberT1,treatment_totalnumberT2,treatment_totalnumberT3,cgis_adm_scoreT1,
+                                     cgis_adm_scoreT2,cgis_adm_scoreT3,cgis_dis_scoreT1,cgis_dis_scoreT2,cgis_dis_scoreT3,GAFscoreT1,GAFscoreT2,GAFscoreT3)
 descriptive_3 =descriptive_3 %>% rename("Diabetes"=medical_history_dia,"Substance use disorder"=medical_history_sud,"High blood pressure"=medical_history_hbp,              
                          "Renal failure"=medical_history_ren,"Solid tumour"=medical_history_tum, "Anxiety disorder"=medical_history_anx,
                          "Other mood disorders"=medical_history_mood,"Anxiolytics"=trt_anx,"Anticonvulsants"=trt_con,"Antidepressants"=trt_adt,
@@ -283,10 +284,9 @@ descriptive_3 =descriptive_3 %>% rename("Diabetes"=medical_history_dia,"Substanc
                          "Number of Rehospitalization"=rehospitalization_totalnumber,"Total Rehospitalization length-of-stay"=rehospitalization_LOS_totalnumber,
                          "Total Rehospitalization cost"=rehospitalization_cost_totalnumber,"CGIS at admission T1"=cgis_adm_scoreT1,"CGIS at admission T2"=cgis_adm_scoreT2,"CGIS at admission T3"=cgis_adm_scoreT3,
                          "CGIS at discharge T1"=cgis_dis_scoreT1,"CGIS at discharge T2"=cgis_dis_scoreT2,"CGIS at discharge T3"=cgis_dis_scoreT3,"GAF score T1"=GAFscoreT1,
-                         "GAF score T1=2"=GAFscoreT2,"GAF score T3"=GAFscoreT3)
+                         "GAF score T2"=GAFscoreT2,"GAF score T3"=GAFscoreT3,"No. of treatment T1"=treatment_totalnumberT1,"No. of treatment T2"=treatment_totalnumberT2,"No. of treatment T3"=treatment_totalnumberT3)
 
 
-#all.ndfullymatch$Age <- cut(all.ndfullymatch$Age, breaks = c(18,35,45,55,65,75,Inf), right = F)#65 is 65 to 74,labels = c("<30","51<30-100","101-199","200-499","500-999", "1000+"), include.lowest = TRUE)
 
 library(tableone)
 #strata = "SSRI",
@@ -294,13 +294,15 @@ descriptive_3.table <- CreateTableOne(addOverall = TRUE,includeNA=TRUE,vars = co
 
 print(descriptive_3.table, smd = TRUE)#after matching
 descriptive_3.tablecsv=print(descriptive_3.table, smd = TRUE,quote = FALSE, noSpaces = TRUE, printToggle = FALSE)#prematching#SMDs which are greater than 0.1 because those are the variables which shows imbalance in the dataset and that is where we actually need to do propensity score matching.
-write.csv(descriptive_3.tablecsv, file = "~/Downloads/cat2.csv")
+write.csv(descriptive_3.tablecsv, file = "~/Downloads/cat1.csv")
 View(descriptive_3.tablecsv)
 View(descriptive_3.table)
 
 ## Variables smd>0.2, not good balance
-smd_values1 <- ExtractSmd(descriptive_3.table )
-smd_values1[smd_values1 > 0.2, ]
+smd_values1 <- ExtractSmd(descriptive_3.table)
+smd_values1_df <- as.data.frame(smd_values1)
+smd_subset <- smd_values1_df[smd_values1_df > 0.2, , drop = FALSE]
+
 
 
 ####Graphs
@@ -358,15 +360,96 @@ ggplot(treatment_data, aes(x = "", y = Percentage, fill = Treatment)) +
   theme(legend.position = "right") +
   scale_y_continuous(labels = percent)
 
-####Demographics
-#descriptive_2 %>% rename(Gender = gender,Resident_status = resident_status)
-descriptive_2[, -c(1,5)] <- lapply(descriptive_2[, -c(1,5)] , as.factor)
-descriptive_2[, c(1,5)] <- lapply(descriptive_2[, c(1,5)] , as.numeric)
-descriptive_2.table <- CreateTableOne(addOverall = TRUE,includeNA=TRUE,vars = colnames(descriptive_2[, -c(1)]),data = descriptive_2,test = TRUE)
-print(descriptive_2.table, smd = TRUE)#after matching
-descriptive_2.tablecsv=print(descriptive_2.table, smd = TRUE,quote = FALSE, noSpaces = TRUE, printToggle = FALSE)#prematching#SMDs which are greater than 0.1 because those are the variables which shows imbalance in the dataset and that is where we actually need to do propensity score matching.
-write.csv(descriptive_2.tablecsv, file = "/Downloads/cat1.csv")
-View(descriptive_2.tablecsv)
+# Plot the boxplot
+library(dplyr)
+library(tidyr)
+# Reshape data to long format
+long_data=descriptive_2 %>%
+  mutate(treatment_totalnumberT0=treatment_totalnumber)%>%
+  mutate(GAFscoreT0=gaf_lv)%>%
+  mutate(cgis_adm_scoreT0=cgis_adm)%>%
+  mutate(cgis_dis_scoreT0=cgis_dis)%>%
+  mutate(trt_ssr = ifelse(trt_ssr == 1, "SSRI", ifelse(trt_ssr == 0, "Non-SSRI", trt_ssr)))
+
+f <- function(y) c(label=length(y), y=median(y))
+
+#Option1
+long_data <-long_data %>%
+  pivot_longer(cols = starts_with("GAFscoreT"), 
+               names_to = "time_point", 
+               values_to = "GAF_score")%>%
+  filter(!is.na(GAF_score))
+
+long_data$GAF_score=as.numeric(long_data$GAF_score)
+my_comparisons <- list( c("GAFscoreT0", "GAFscoreT1"), c("GAFscoreT0", "GAFscoreT2"), c("GAFscoreT0", "GAFscoreT3") )
+
+ggplot(long_data, aes(x = time_point, y = GAF_score, fill = time_point))+geom_boxplot(varwidth = T,alpha=.2)+
+  labs(title = "Distribution of GAF Scores Over Time",x = "Time Point",y = "GAF Score") +
+  stat_summary(fun=mean, geom="point", shape=20, size=3, color="red", fill="red")+
+  stat_compare_means(comparisons = my_comparisons,method = "wilcox.test")+ # Add pairwise comparisons p-value #wilconxon= Mann-Whitney U test
+  stat_compare_means(method = "anova",label.y = max(long_data$GAF_score)+3)  +   # Add global p-value
+  stat_summary(fun.data=f, geom="text", vjust=-0.5, col="black")+
+  theme_minimal() +scale_x_discrete(labels=c('T0', 'T1', 'T2','T3'))+
+  facet_wrap(.~trt_ssr, scales = "free")
+
+#Option2
+long_data <-long_data %>%
+  pivot_longer(cols = starts_with("cgis_adm_scoreT"), 
+               names_to = "time_point", 
+               values_to = "CGIS_adm_score")%>%
+  filter(!is.na(CGIS_adm_score))
+
+long_data$CGIS_adm_score=as.numeric(long_data$CGIS_adm_score)
+my_comparisons <- list( c("cgis_adm_scoreT0", "cgis_adm_scoreT1"), c("cgis_adm_scoreT0", "cgis_adm_scoreT2"), c("cgis_adm_scoreT0", "cgis_adm_scoreT3") )
+
+ggplot(long_data, aes(x = time_point, y = CGIS_adm_score, fill = time_point))+geom_boxplot(varwidth = T,alpha=.2)+
+  labs(title = "Distribution of CGIS Scores At Admission Over Time",x = "Time Point",y = "CGIS Scores At Admission") +
+  stat_summary(fun=mean, geom="point", shape=20, size=3, color="red", fill="red")+
+  stat_compare_means(comparisons = my_comparisons,method = "wilcox.test")+ # Add pairwise comparisons p-value #wilconxon= Mann-Whitney U test
+  stat_compare_means(method = "anova",label.y = max(long_data$CGIS_adm_score)+3)  +   # Add global p-value
+  stat_summary(fun.data=f, geom="text", vjust=-0.5, col="black")+
+  theme_minimal() +scale_x_discrete(labels=c('T0', 'T1', 'T2','T3'))+
+  facet_wrap(.~trt_ssr, scales = "free")
+
+#Option3
+long_data <-long_data %>%
+  pivot_longer(cols = starts_with("cgis_dis_scoreT"), 
+               names_to = "time_point", 
+               values_to = "CGIS_dis_score")%>%
+  filter(!is.na(CGIS_dis_score))
+
+long_data$CGIS_dis_score=as.numeric(long_data$CGIS_dis_score)
+my_comparisons <- list( c("cgis_dis_scoreT0", "cgis_dis_scoreT1"), c("cgis_dis_scoreT0", "cgis_dis_scoreT2"), c("cgis_dis_scoreT0", "cgis_dis_scoreT3") )
+
+ggplot(long_data, aes(x = time_point, y = CGIS_dis_score, fill = time_point))+geom_boxplot(varwidth = T,alpha=.2)+
+  labs(title = "Distribution of CGIS Scores At Discharge Over Time",x = "Time Point",y = "CGIS Scores At Discharge") +
+  stat_summary(fun=mean, geom="point", shape=20, size=3, color="red", fill="red")+
+  stat_compare_means(comparisons = my_comparisons,method = "wilcox.test")+ # Add pairwise comparisons p-value #wilconxon= Mann-Whitney U test
+  stat_compare_means(method = "anova",label.y = max(long_data$CGIS_dis_score)+3)  +   # Add global p-value
+  stat_summary(fun.data=f, geom="text", vjust=-0.5, col="black")+
+  theme_minimal() +scale_x_discrete(labels=c('T0', 'T1', 'T2','T3'))+
+  facet_wrap(.~trt_ssr, scales = "free")
+
+#Option4
+long_data <-long_data %>%#descriptive_3
+  pivot_longer(cols = starts_with("treatment_totalnumberT"), 
+               names_to = "time_point", 
+               values_to = "treatment_total_number")%>%
+  filter(!is.na(treatment_total_number))
+
+long_data$treatment_total_number=as.numeric(long_data$treatment_total_number)
+my_comparisons <- list( c("treatment_totalnumberT0", "treatment_totalnumberT1"), c("treatment_totalnumberT0", "treatment_totalnumberT2"), c("treatment_totalnumberT0", "treatment_totalnumberT3") )
+
+library(scales)
+ggplot(long_data, aes(x = time_point, y = treatment_total_number, fill = time_point))+geom_boxplot(varwidth = T,alpha=.2)+
+  labs(title = "Distribution of Number of Treatments Over Time",x = "Time Point",y = "Number of Treatments") +
+  stat_summary(fun=mean, geom="point", shape=20, size=3, color="red", fill="red")+
+  stat_compare_means(comparisons = my_comparisons,method = "wilcox.test")+ # Add pairwise comparisons p-value #wilconxon= Mann-Whitney U test
+  stat_compare_means(method = "anova",label.y = max(long_data$treatment_total_number)+3)  +   # Add global p-value
+  stat_summary(fun.data=f, geom="text", vjust=-0.5, col="black")+
+  theme_minimal()+scale_x_discrete(labels=c('T0', 'T1', 'T2','T3'))+
+  facet_wrap(.~trt_ssr, scales = "free")
+
 
 
 
