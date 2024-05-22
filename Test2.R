@@ -114,7 +114,7 @@ clinical_data_bill_demo_3=clinical_data_bill_demo_3%>%
   ungroup()%>%
   select(-rehospitalization_cost)#no need, this is just to calculate rehospitalization_cost_totalnumber
 
-#Find out subsequent number of treatments for each patient
+#Find out subsequent total number of treatments for each patient
 clinical_data_bill_demo_3=clinical_data_bill_demo_3%>%
   group_by(patient_id) %>%
   mutate(treatment_totalnumberT_1 = ifelse(hospitalization_nth == 2, treatment_totalnumber, 0))%>%#1st rehospitalization
@@ -171,6 +171,7 @@ clinical_data_bill_demo_3=clinical_data_bill_demo_3%>%
   ungroup()%>%
   select(-cgis_dis_scoreT_1,-cgis_dis_scoreT_2,-cgis_dis_scoreT_3)#no need
 
+#Convert 0 to NA as they should be NA values in the absence of rehospitalization
 colnames(clinical_data_bill_demo_3)
 clinical_data_bill_demo_3=clinical_data_bill_demo_3%>%
   mutate_at(vars(41:52),~ifelse(.==0,NA,.))
@@ -182,53 +183,21 @@ earliest_admissions <- clinical_data_bill_demo_3 %>%
   ungroup()
 
 
-
 #Data selection
 descriptive=earliest_admissions#earliest_admissions#demographics #clinical_data_bill_demo_3
 
-#Descriptive stats
 
 #Remove unneccesary columns
 descriptive_2=descriptive%>%
   select(-c("date_of_birth"))
 
-#Missing data
 colnames(descriptive_2)
 
-
+#As.factor or as.numeric variables
 descriptive_2[, -c(22:27,31:33,35,38:51)] <- lapply(descriptive_2[, -c(22:27,31:33,35,38:51)] , as.factor)
 descriptive_2[, c(22:27,31:33,35,38:51)] <- lapply(descriptive_2[, c(22:27,31:33,35,38:51)] , as.numeric)
 
-
-#Find variables significant in predicting outcomes (logistic regression models,retain those with an association having a p-value of ≤ 0.1)
-
-vars <- colnames(descriptive_2)[-c(1:3,27,31,36:51)]#remove ID, date of admission and discharge, cost, LOS,hospitalization
-xvars = list()
-
-#rehospitalization_totalnumber
-for (var in vars) {
-  mod <- as.formula(sprintf("rehospitalization_totalnumber ~ %s", var))
-  fit <- glm(formula = mod, data = descriptive_2, family=binomial(link = "logit"))
-  p_value <- summary(fit)$coefficients[,4][2]
-  if (p_value <= 0.1){
-    xvars[[var]] <- fit
-  }
-}#"cgis_dis"
-
-#rehospitalization_LOS_totalnumber
-for (var in vars) {
-  mod <- as.formula(sprintf("rehospitalization_LOS_totalnumber ~ %s", var))
-  fit <- glm(formula = mod, data = descriptive_2, family= gaussian(link = "identity"))
-  p_value <- summary(fit)$coefficients[,4][2]
-  if (p_value <= 0.1){
-    xvars[[var]] <- fit
-  }
-}#"medical_history_ren" "cgis_dis" 
-
-xvars <- names(xvars)
-print(xvars)
-
-#Missing data
+#Missing data/Multiple imputation
 library(naniar)
 library(mice)
 Missingdata=descriptive_2
@@ -244,11 +213,38 @@ completeddata<- complete(tempData,1)
 descriptive_2_completeddata=cbind(completeddata,descriptive_2[,c(27,31,36:48)])#remove ID, date of admission and discharge
 
 
+#Find variables significant in predicting outcomes (logistic regression models,retain those with an association having a p-value of ≤ 0.1)
+vars <- colnames(descriptive_2)[-c(1:3,27,31,36:51)]#remove ID, date of admission and discharge, cost, LOS,hospitalization
+xvars = list()
+
+#Outcome 1: rehospitalization_totalnumber
+for (var in vars) {
+  mod <- as.formula(sprintf("rehospitalization_totalnumber ~ %s", var))
+  fit <- glm(formula = mod, data = descriptive_2, family=binomial(link = "logit"))
+  p_value <- summary(fit)$coefficients[,4][2]
+  if (p_value <= 0.1){
+    xvars[[var]] <- fit
+  }
+}#"cgis_dis"
+
+#utcome 2: rehospitalization_LOS_totalnumber
+for (var in vars) {
+  mod <- as.formula(sprintf("rehospitalization_LOS_totalnumber ~ %s", var))
+  fit <- glm(formula = mod, data = descriptive_2, family= gaussian(link = "identity"))
+  p_value <- summary(fit)$coefficients[,4][2]
+  if (p_value <= 0.1){
+    xvars[[var]] <- fit
+  }
+}#"medical_history_ren" "cgis_dis" 
+
+xvars <- names(xvars)
+print(xvars)
+
 #Propensity score matching
+
 library(MatchIt)
 
 matchitdata=descriptive_2_completeddata
-
 
 set.seed(123)
 m.out <- matchit(as.factor(trt_ssr) ~ gender + race +Age+resident_status+medical_history_dia + medical_history_sud + medical_history_hbp +
@@ -262,6 +258,7 @@ md <- match.data(m.out)
 md <- md%>%select(-c("distance","weights","subclass"))
 
 #Select population of interest
+
 descriptive_3=descriptive_2[, -c(1,2,3)]#descriptive_2_completeddata#descriptive_2[, -c(1,2,3)]#md
 
 descriptive_3=descriptive_3%>%select(gender,Age,race,resident_status,weight,height,BMI,medical_history_dia,medical_history_sud,medical_history_hbp,medical_history_ren,medical_history_tum,medical_history_anx,medical_history_mood,
@@ -283,14 +280,14 @@ descriptive_3 =descriptive_3 %>% rename("Diabetes"=medical_history_dia,"Substanc
                          "GAF score T2"=GAFscoreT2,"GAF score T3"=GAFscoreT3,"No. of treatment T1"=treatment_totalnumberT1,"No. of treatment T2"=treatment_totalnumberT2,"No. of treatment T3"=treatment_totalnumberT3)
 
 
-
+#Descriptive stats
 library(tableone)
 #strata = "SSRI",
-descriptive_3.table <- CreateTableOne(addOverall = TRUE,includeNA=TRUE,vars = colnames(descriptive_3),data = descriptive_3,test = TRUE)
+descriptive_3.table <- CreateTableOne(strata = "SSRI",addOverall = TRUE,includeNA=TRUE,vars = colnames(descriptive_3),data = descriptive_3,test = TRUE)
 
 print(descriptive_3.table, smd = TRUE)#after matching
 descriptive_3.tablecsv=print(descriptive_3.table, smd = TRUE,quote = FALSE, noSpaces = TRUE, printToggle = FALSE)#prematching#SMDs which are greater than 0.1 because those are the variables which shows imbalance in the dataset and that is where we actually need to do propensity score matching.
-write.csv(descriptive_3.tablecsv, file = "~/Downloads/cat2.csv")
+write.csv(descriptive_3.tablecsv, file = "~/Downloads/cat3.csv")
 View(descriptive_3.tablecsv)
 View(descriptive_3.table)
 
@@ -305,7 +302,6 @@ smd_subset <- smd_values1_df[smd_values1_df > 0.2, , drop = FALSE]
 ###Treatment combinations
 # Count occurrences of each treatment combination
 treatment_counts <- table(descriptive_3$`Treatment combination`)
-
 
 treatment_data <- data.frame(
   Treatment = names(treatment_counts),
@@ -345,9 +341,7 @@ ggplot(treatment_data, aes(x = "", y = Count, fill = as.factor(Treatment_number)
         legend.title = element_blank()) +  # Remove legend title
   labs(title = "Number of Treatments")
 
-
 # Plot the boxplot
-library(dplyr)
 library(tidyr)
 # Reshape data to long format
 long_data=descriptive_2 %>%
@@ -372,7 +366,7 @@ my_comparisons <- list( c("GAFscoreT0", "GAFscoreT1"), c("GAFscoreT0", "GAFscore
 ggplot(long_data, aes(x = time_point, y = GAF_score, fill = time_point))+geom_boxplot(varwidth = T,alpha=.2)+
   labs(title = "Distribution of GAF Scores Over Time",x = "Time Point",y = "GAF Score") +
   stat_summary(fun=mean, geom="point", shape=20, size=3, color="red", fill="red")+
-  stat_compare_means(comparisons = my_comparisons,method = "wilcox.test")+ # Add pairwise comparisons p-value #wilconxon= Mann-Whitney U test
+  stat_compare_means(comparisons = my_comparisons,method = "wilcox.test")+ # Add pairwise comparisons p-value #wilcoxon= Mann-Whitney U test
   stat_compare_means(method = "anova",label.y = max(long_data$GAF_score)+3)  +   # Add global p-value
   stat_summary(fun.data=f, geom="text", vjust=-0.5, col="black")+
   theme_minimal() +scale_x_discrete(labels=c('T0', 'T1', 'T2','T3'))+
