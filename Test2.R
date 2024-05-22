@@ -86,8 +86,6 @@ clinical_data_bill_demo_2 <- clinical_data_bill_demo_2 %>%
   ungroup()
 
 
-
-
 #Find out which nth hospitalization for each admission
 clinical_data_bill_demo_3=clinical_data_bill_demo_2%>%
   group_by(patient_id) %>%
@@ -122,10 +120,10 @@ clinical_data_bill_demo_3=clinical_data_bill_demo_3%>%
   mutate(treatment_totalnumberT_1 = ifelse(hospitalization_nth == 2, treatment_totalnumber, 0))%>%#1st rehospitalization
   mutate(treatment_totalnumberT1 = sum(treatment_totalnumberT_1))%>%
   group_by(patient_id) %>%
-  mutate(treatment_totalnumberT_2 = ifelse(hospitalization_nth == 3, gaf_lv, 0))%>%
+  mutate(treatment_totalnumberT_2 = ifelse(hospitalization_nth == 3, treatment_totalnumber, 0))%>%
   mutate(treatment_totalnumberT2 = sum(treatment_totalnumberT_2))%>%
   group_by(patient_id) %>%
-  mutate(treatment_totalnumberT_3 = ifelse(hospitalization_nth == 4, gaf_lv, 0))%>%
+  mutate(treatment_totalnumberT_3 = ifelse(hospitalization_nth == 4, treatment_totalnumber, 0))%>%
   mutate(treatment_totalnumberT3 = sum(treatment_totalnumberT_3))%>%
   ungroup()%>%
   select(-treatment_totalnumberT_1,-treatment_totalnumberT_2,-treatment_totalnumberT_3)#no need
@@ -202,7 +200,7 @@ descriptive_2[, -c(22:27,31:33,35,38:51)] <- lapply(descriptive_2[, -c(22:27,31:
 descriptive_2[, c(22:27,31:33,35,38:51)] <- lapply(descriptive_2[, c(22:27,31:33,35,38:51)] , as.numeric)
 
 
-#Find variables signifcant in predicting outcomes (logistic regression models,retain those with an association having a p-value of ≤ 0.1)
+#Find variables significant in predicting outcomes (logistic regression models,retain those with an association having a p-value of ≤ 0.1)
 
 vars <- colnames(descriptive_2)[-c(1:3,27,31,36:51)]#remove ID, date of admission and discharge, cost, LOS,hospitalization
 xvars = list()
@@ -263,10 +261,8 @@ summary(m.out)
 md <- match.data(m.out)
 md <- md%>%select(-c("distance","weights","subclass"))
 
-
+#Select population of interest
 descriptive_3=descriptive_2[, -c(1,2,3)]#descriptive_2_completeddata#descriptive_2[, -c(1,2,3)]#md
-
-
 
 descriptive_3=descriptive_3%>%select(gender,Age,race,resident_status,weight,height,BMI,medical_history_dia,medical_history_sud,medical_history_hbp,medical_history_ren,medical_history_tum,medical_history_anx,medical_history_mood,
                                      trt_anx,trt_con,trt_adt,trt_ssr,trt_the,trt_oth,combined_trt,treatment_totalnumber,symptom_1,symptom_2,symptom_3,symptom_4,symptom_5,
