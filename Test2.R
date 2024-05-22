@@ -290,7 +290,7 @@ descriptive_3.table <- CreateTableOne(addOverall = TRUE,includeNA=TRUE,vars = co
 
 print(descriptive_3.table, smd = TRUE)#after matching
 descriptive_3.tablecsv=print(descriptive_3.table, smd = TRUE,quote = FALSE, noSpaces = TRUE, printToggle = FALSE)#prematching#SMDs which are greater than 0.1 because those are the variables which shows imbalance in the dataset and that is where we actually need to do propensity score matching.
-write.csv(descriptive_3.tablecsv, file = "~/Downloads/cat1.csv")
+write.csv(descriptive_3.tablecsv, file = "~/Downloads/cat2.csv")
 View(descriptive_3.tablecsv)
 View(descriptive_3.table)
 
@@ -298,7 +298,6 @@ View(descriptive_3.table)
 smd_values1 <- ExtractSmd(descriptive_3.table)
 smd_values1_df <- as.data.frame(smd_values1)
 smd_subset <- smd_values1_df[smd_values1_df > 0.2, , drop = FALSE]
-
 
 
 ####Graphs
@@ -346,15 +345,6 @@ ggplot(treatment_data, aes(x = "", y = Count, fill = as.factor(Treatment_number)
         legend.title = element_blank()) +  # Remove legend title
   labs(title = "Number of Treatments")
 
-# Plot the pie chart
-ggplot(treatment_data, aes(x = "", y = Percentage, fill = Treatment)) +
-  geom_bar(width = 1, stat = "identity") +
-  coord_polar("y", start = 0) +
-  theme_void() +
-  labs(title = "Breakdown of Treatment Combinations for MDD Patients") +
-  scale_fill_discrete(name = "Treatment Combinations") +
-  theme(legend.position = "right") +
-  scale_y_continuous(labels = percent)
 
 # Plot the boxplot
 library(dplyr)
